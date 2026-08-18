@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+
+add_executable(RotationalSurfaceFitterTest main.cpp)
+target_link_libraries(RotationalSurfaceFitterTest PRIVATE SMRobotSpray::SprayThicknessPrediction)
+target_compile_features(RotationalSurfaceFitterTest PRIVATE cxx_std_17)
+set_target_properties(RotationalSurfaceFitterTest PROPERTIES FOLDER tests/SMRobotSpray)
+add_test(NAME RotationalSurfaceFitterTest COMMAND $<TARGET_FILE:RotationalSurfaceFitterTest>)

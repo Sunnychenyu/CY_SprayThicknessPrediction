@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+
+add_executable(DemoThicknessPredictionTest main.cpp)
+target_link_libraries(DemoThicknessPredictionTest PRIVATE SMRobotSpray::SprayThicknessPrediction)
+target_compile_features(DemoThicknessPredictionTest PRIVATE cxx_std_17)
+set_target_properties(DemoThicknessPredictionTest PROPERTIES FOLDER tests/SMRobotSpray)
+add_test(NAME DemoThicknessPredictionTest COMMAND $<TARGET_FILE:DemoThicknessPredictionTest>)
