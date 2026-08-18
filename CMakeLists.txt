@@ -36,7 +36,6 @@ set_target_properties( ${TARGET_NAME} PROPERTIES
 
 if(BuildTests)
     add_subdirectory(regression/DemoThicknessPredictionTest)
-    add_subdirectory(regression/RotationalSurfaceFitterTest)
 endif()
 
 if( ExportPacakge${PACKAGE_NAME}_${TARGET_NAME} )

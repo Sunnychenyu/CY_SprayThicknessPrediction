@@ -6,15 +6,6 @@
 
 namespace spraythickness
 {
-    const char* thicknessModelId(ThicknessModelKind model)
-    {
-        switch(model) {
-        case ThicknessModelKind::PaperGaussian:
-            return "paper_gaussian";
-        }
-        return "unknown";
-    }
-
     bool ThicknessField::empty() const
     {
         return results.empty();
@@ -110,17 +101,16 @@ namespace spraythickness
             return result;
         }
 
-        if (options.trajectorySamplingMode == TrajectorySamplingMode::ResampleByTimeStep
-            && options.timeStep <= 0.0)
+        if (options.timeStep <= 0.0)
         {
             result.warnings.push_back("Thickness prediction timeStep must be positive.");
             result.metrics = ThicknessMetricsCalculator::calculate(result.field, options);
             return result;
         }
 
-        const auto samples = options.trajectorySamplingMode == TrajectorySamplingMode::OriginalPoints
-            ? spraytrajectory::SprayTrajectorySampler::originalSamples(trajectory)
-            : spraytrajectory::SprayTrajectorySampler::sample(trajectory, options.timeStep);
+        const auto samples = spraytrajectory::SprayTrajectorySampler::sample(
+            trajectory,
+            options.timeStep);
 
         if (samples.empty())
         {
@@ -131,9 +121,8 @@ namespace spraythickness
 
         bool sawDifferentProcessId = false;
 
-        for (size_t sampleIndex = 0; sampleIndex < samples.size(); ++sampleIndex)
+        for (const auto& trajectorySample : samples)
         {
-            const auto& trajectorySample = samples[sampleIndex];
             if (!trajectorySample.sprayEnabled)
                 continue;
 
@@ -143,12 +132,6 @@ namespace spraythickness
                 sawDifferentProcessId = true;
                 continue;
             }
-
-            const double deltaTime = sampleIndex + 1 < samples.size()
-                ? std::max(0.0, samples[sampleIndex + 1].time - trajectorySample.time)
-                : (samples.size() == 1 ? 1.0 : 0.0);
-            if(deltaTime <= 0.0)
-                continue;
 
             const Eigen::Isometry3d toolPose = trajectorySample.tcpPose * tool.T_link_tool;
 
@@ -169,7 +152,7 @@ namespace spraythickness
                     ? std::max(0.0, surfaceSample.areaWeight)
                     : 1.0;
 
-                result.field.results[i].thickness += depositRate * deltaTime * areaWeight;
+                result.field.results[i].thickness += depositRate * options.timeStep * areaWeight;
             }
         }
 
