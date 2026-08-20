@@ -74,10 +74,19 @@ namespace spraythickness
         double backendTotalMilliseconds{ 0.0 };
         double spatialGridCellSizeMeters{ 0.0 };
         std::size_t predictionVertexCount{ 0 };
+        std::size_t spatialInputVertexCount{ 0 };
+        std::size_t spatialSkippedVertexCount{ 0 };
         std::size_t sprayPointCount{ 0 };
         std::size_t spatialGridCellCount{ 0 };
         std::size_t spatialGridCandidateCellPairs{ 0 };
         std::size_t spatialGridCandidateVertexPairs{ 0 };
+        std::size_t axisymmetricBindingCount{ 0 };
+        std::size_t axisymmetricActiveBindingCount{ 0 };
+        std::size_t axisymmetricMappedZeroCount{ 0 };
+        std::size_t axisymmetricMappedNonzeroCount{ 0 };
+        std::size_t axisymmetricMappedInvalidCount{ 0 };
+        std::size_t axisymmetricActiveSegmentCount{ 0 };
+        std::size_t axisymmetricActiveProfilePathCount{ 0 };
         int spatialGridDimensionX{ 0 };
         int spatialGridDimensionY{ 0 };
         int spatialGridDimensionZ{ 0 };
@@ -134,7 +143,7 @@ namespace spraythickness
         double angularHaloRadians{ 0.0 };
         double maximumMappingDistanceMeters{ 1.0e-3 };
         double maximumNormalAngleDegrees{ 20.0 };
-        double contributionCutoffRatio{ 1.0e-6 };
+        double contributionCutoffRatio{ 1.0e-10 };
         bool reduceTrajectory{ false };
         bool fallbackToFullPrediction{ true };
     };
@@ -143,6 +152,9 @@ namespace spraythickness
     {
         std::uint32_t firstSampleIndex{ 0 };
         std::uint32_t secondSampleIndex{ 0 };
+        // The selected segment is retained for branch diagnostics and cache
+        // validation. It does not change the interpolation data path.
+        std::uint32_t segmentIndex{ 0 };
         float interpolation{ 0.0f };
         bool active{ false };
     };
@@ -151,6 +163,7 @@ namespace spraythickness
     {
         std::uint32_t firstSampleIndex{ 0 };
         std::uint32_t secondSampleIndex{ 0 };
+        std::uint32_t profilePathIndex{ 0 };
         Eigen::Vector2d firstSectionPosition = Eigen::Vector2d::Zero();
         Eigen::Vector2d secondSectionPosition = Eigen::Vector2d::Zero();
     };
@@ -173,9 +186,13 @@ namespace spraythickness
         bool enabled{ false };
         // Gaussian pattern values below this ratio are treated as zero by
         // the experimental spatial-filtered path.
-        double contributionCutoffRatio{ 1.0e-6 };
+        double contributionCutoffRatio{ 1.0e-10 };
         bool overrideGridCellSize{ false };
         double gridCellSizeMeters{ 0.0 };
+        // Skip GPU dispatch for vertices whose spatial-grid cell has no
+        // candidate spray points. Their thickness is exactly zero under the
+        // same cutoff used by spatial filtering.
+        bool filterCandidateVertices{ false };
         bool fallbackToFullPrediction{ true };
     };
 
