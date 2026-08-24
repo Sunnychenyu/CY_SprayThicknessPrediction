@@ -179,6 +179,7 @@ namespace spraythickness
         Eigen::Vector3d radialDirection = Eigen::Vector3d::UnitX();
         Eigen::Vector2d selectionMinimum = Eigen::Vector2d::Zero();
         Eigen::Vector2d selectionMaximum = Eigen::Vector2d::Zero();
+        std::vector<Eigen::Vector2d> selectionPolygon;
     };
 
     struct SpatialInfluenceFilteringOptions
@@ -193,6 +194,10 @@ namespace spraythickness
         // candidate spray points. Their thickness is exactly zero under the
         // same cutoff used by spatial filtering.
         bool filterCandidateVertices{ false };
+        // Optional restricted prediction list. The workpiece remains complete
+        // so its triangle data can still be used for occlusion BVH traversal.
+        // An empty list preserves the original all-vertex behavior.
+        std::vector<std::uint32_t> predictionVertexIndices;
         bool fallbackToFullPrediction{ true };
     };
 
