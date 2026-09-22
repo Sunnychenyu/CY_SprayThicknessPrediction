@@ -146,7 +146,7 @@ namespace spraythickness
 
             const double deltaTime = sampleIndex + 1 < samples.size()
                 ? std::max(0.0, samples[sampleIndex + 1].time - trajectorySample.time)
-                : (samples.size() == 1 ? 1.0 : 0.0);
+                : 0.0;
             if(deltaTime <= 0.0)
                 continue;
 
