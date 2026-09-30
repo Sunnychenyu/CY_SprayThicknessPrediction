@@ -11,12 +11,6 @@ namespace spraythickness::published
     {
         constexpr double kEpsilon = 1.0e-12;
 
-        struct TriangulatedFukeMesh
-        {
-            TriangleMesh mesh;
-            std::vector<std::vector<std::size_t>> trianglesByPolygon;
-        };
-
         double elapsedMilliseconds(
             const std::chrono::steady_clock::time_point& started)
         {
@@ -24,16 +18,15 @@ namespace spraythickness::published
                 std::chrono::steady_clock::now() - started).count();
         }
 
-        TriangulatedFukeMesh triangulate(
+        TriangleMesh triangulate(
             const FukeInputModel& input,
             const Eigen::Isometry3d& pose)
         {
-            TriangulatedFukeMesh output;
-            output.mesh.vertices.reserve(input.vertices.size());
+            TriangleMesh output;
+            output.vertices.reserve(input.vertices.size());
             for(const Eigen::Vector3d& vertex : input.vertices) {
-                output.mesh.vertices.push_back(pose * vertex);
+                output.vertices.push_back(pose * vertex);
             }
-            output.trianglesByPolygon.resize(input.polygons.size());
             for(std::size_t polygonIndex = 0;
                 polygonIndex < input.polygons.size(); ++polygonIndex) {
                 const auto& indices = input.polygons[polygonIndex].vertexIndices;
@@ -47,13 +40,9 @@ namespace spraythickness::published
                             "Fuke polygon contains an invalid vertex index.");
                     }
                 }
-                output.trianglesByPolygon[polygonIndex].push_back(
-                    output.mesh.faces.size());
-                output.mesh.faces.push_back({ indices[0], indices[1], indices[2] });
+                output.faces.push_back({ indices[0], indices[1], indices[2] });
                 if(indices.size() == 4) {
-                    output.trianglesByPolygon[polygonIndex].push_back(
-                        output.mesh.faces.size());
-                    output.mesh.faces.push_back({ indices[0], indices[2], indices[3] });
+                    output.faces.push_back({ indices[0], indices[2], indices[3] });
                 }
             }
             return output;
@@ -83,14 +72,13 @@ namespace spraythickness::published
             const Eigen::Vector3d third = pose * input.vertices.at(
                 polygon.vertexIndices.at(2));
             const Eigen::Vector3d normal = (second - first).cross(third - first);
-            return normal.squaredNorm() > kEpsilon
+            return normal.squaredNorm() > 1.0e-30
                 ? normal.normalized()
                 : Eigen::Vector3d::Zero();
         }
 
         bool visible(
-            const TriangulatedFukeMesh& mesh,
-            std::size_t polygonIndex,
+            const TriangleMesh& mesh,
             const Eigen::Vector3d& source,
             const Eigen::Vector3d& centroid)
         {
@@ -99,23 +87,9 @@ namespace spraythickness::published
             if(targetDistance <= kEpsilon) {
                 return false;
             }
-            for(std::size_t triangleIndex = 0;
-                triangleIndex < mesh.mesh.faces.size(); ++triangleIndex) {
-                const auto& ownTriangles = mesh.trianglesByPolygon[polygonIndex];
-                if(std::find(ownTriangles.begin(), ownTriangles.end(), triangleIndex)
-                    != ownTriangles.end()) {
-                    continue;
-                }
-                TriangleMesh oneTriangle;
-                oneTriangle.vertices = mesh.mesh.vertices;
-                oneTriangle.faces.push_back(mesh.mesh.faces[triangleIndex]);
-                RayHit hit;
-                if(nearestRayHit(oneTriangle, source, ray, hit)
-                    && hit.distance < targetDistance - 1.0e-9) {
-                    return false;
-                }
-            }
-            return true;
+            RayHit hit;
+            return !nearestRayHit(mesh, source, ray, hit)
+                || hit.distance >= targetDistance - 1.0e-9;
         }
     }
 
@@ -137,6 +111,9 @@ namespace spraythickness::published
         const FukeParameters& parameters,
         const ReproductionExecution& execution)
     {
+        reportDiagnostic(execution, "Input validation",
+            "polygons=" + std::to_string(input.polygons.size())
+                + ", poses=" + std::to_string(input.timesSeconds.size()));
         parameters.validate();
         if(input.vertices.empty() || input.polygons.empty()) {
             throw std::invalid_argument("Fuke polygon mesh is empty.");
@@ -145,6 +122,11 @@ namespace spraythickness::published
             || input.timesSeconds.size() != input.workpiecePoses.size()) {
             throw std::invalid_argument(
                 "Fuke reproduction requires matching timed workpiece poses.");
+        }
+        if(!input.sprayEnabled.empty()
+            && input.sprayEnabled.size() != input.timesSeconds.size()) {
+            throw std::invalid_argument(
+                "Fuke spray flags must match timed workpiece poses.");
         }
         if(input.vaporSourceNormal.squaredNorm() <= kEpsilon) {
             throw std::invalid_argument("Fuke vapor source normal is zero.");
@@ -157,6 +139,8 @@ namespace spraythickness::published
         result.statistics.trajectorySampleCount = input.timesSeconds.size();
         result.statistics.evaluatedElementCount = input.polygons.size();
         const Eigen::Vector3d sourceAxis = input.vaporSourceNormal.normalized();
+        reportDiagnostic(execution, "Polygon triangulation and visibility",
+            "polygons=" + std::to_string(input.polygons.size()));
 
         for(std::size_t poseIndex = 0;
             poseIndex + 1 < input.workpiecePoses.size(); ++poseIndex) {
@@ -169,8 +153,11 @@ namespace spraythickness::published
             if(dt <= 0.0) {
                 continue;
             }
+            if(!input.sprayEnabled.empty() && !input.sprayEnabled[poseIndex]) {
+                continue;
+            }
             const Eigen::Isometry3d& pose = input.workpiecePoses[poseIndex];
-            const TriangulatedFukeMesh mesh = triangulate(input, pose);
+            const TriangleMesh mesh = triangulate(input, pose);
             for(std::size_t polygonIndex = 0;
                 polygonIndex < input.polygons.size(); ++polygonIndex) {
                 const Eigen::Vector3d centroid = polygonCentroid(
@@ -190,8 +177,7 @@ namespace spraythickness::published
                     continue;
                 }
                 ++result.statistics.visibilityQueryCount;
-                if(!visible(mesh, polygonIndex,
-                        input.vaporSourcePosition, centroid)) {
+                if(!visible(mesh, input.vaporSourcePosition, centroid)) {
                     ++result.statistics.hiddenElementCount;
                     continue;
                 }
@@ -209,6 +195,11 @@ namespace spraythickness::published
                     / static_cast<double>(input.workpiecePoses.size() - 1),
                 "Fuke 2005 reproduction");
         }
+        reportDiagnostic(execution, "Result assembly",
+            "visibility queries="
+                + std::to_string(result.statistics.visibilityQueryCount)
+                + ", accepted contributions="
+                + std::to_string(result.statistics.candidatePairCount));
         result.statistics.elapsedMilliseconds = elapsedMilliseconds(started);
         return result;
     }

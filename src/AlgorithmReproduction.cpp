@@ -32,8 +32,6 @@ namespace spraythickness
         switch(algorithm) {
         case ReproductionAlgorithmKind::CurrentMethod:
             return "current_gpu";
-        case ReproductionAlgorithmKind::Tanaka2024:
-            return "tanaka_2024";
         case ReproductionAlgorithmKind::Tzinava2020:
             return "tzinava_2020";
         case ReproductionAlgorithmKind::Wu2020:
@@ -53,8 +51,6 @@ namespace spraythickness
         switch(algorithm) {
         case ReproductionAlgorithmKind::CurrentMethod:
             return "Current BVH-GPU method";
-        case ReproductionAlgorithmKind::Tanaka2024:
-            return "Tanaka et al. (2024)";
         case ReproductionAlgorithmKind::Tzinava2020:
             return "Tzinava et al. (2020)";
         case ReproductionAlgorithmKind::Wu2020:
@@ -103,10 +99,6 @@ namespace spraythickness
         const published::ReproductionExecution& execution)
     {
         switch(task.algorithm) {
-        case ReproductionAlgorithmKind::Tanaka2024:
-            return dispatch<published::TanakaInputModel,
-                published::TanakaParameters,
-                published::TanakaReproducer>(task, execution);
         case ReproductionAlgorithmKind::Tzinava2020:
             return dispatch<published::TzinavaInputModel,
                 published::TzinavaParameters,

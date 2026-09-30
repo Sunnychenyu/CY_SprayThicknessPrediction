@@ -10,6 +10,7 @@ namespace spraythickness::published
     namespace
     {
         constexpr double kEpsilon = 1.0e-12;
+        constexpr double kBarycentricEpsilon = 1.0e-10;
 
         bool rayTriangleIntersection(
             const Eigen::Vector3d& origin,
@@ -29,12 +30,14 @@ namespace spraythickness::published
             const double inverse = 1.0 / determinant;
             const Eigen::Vector3d t = origin - first;
             const double u = t.dot(p) * inverse;
-            if(u < 0.0 || u > 1.0) {
+            if(u < -kBarycentricEpsilon
+                || u > 1.0 + kBarycentricEpsilon) {
                 return false;
             }
             const Eigen::Vector3d q = t.cross(edge1);
             const double v = direction.dot(q) * inverse;
-            if(v < 0.0 || u + v > 1.0) {
+            if(v < -kBarycentricEpsilon
+                || u + v > 1.0 + kBarycentricEpsilon) {
                 return false;
             }
             distance = edge2.dot(q) * inverse;
@@ -77,6 +80,16 @@ namespace spraythickness::published
         }
     }
 
+    void reportDiagnostic(
+        const ReproductionExecution& execution,
+        const std::string& stage,
+        const std::string& details)
+    {
+        if(execution.diagnostic) {
+            execution.diagnostic(stage, details);
+        }
+    }
+
     Eigen::Vector3d faceNormal(
         const TriangleMesh& mesh,
         std::size_t faceIndex)
@@ -85,7 +98,7 @@ namespace spraythickness::published
         const Eigen::Vector3d normal =
             (mesh.vertices[face[1]] - mesh.vertices[face[0]])
                 .cross(mesh.vertices[face[2]] - mesh.vertices[face[0]]);
-        if(normal.squaredNorm() <= kEpsilon) {
+        if(normal.squaredNorm() <= 1.0e-30) {
             return Eigen::Vector3d::Zero();
         }
         return normal.normalized();

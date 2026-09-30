@@ -2,7 +2,6 @@
 
 #include <SprayThicknessPrediction/DynamicSurfaceReproduction.h>
 #include <SprayThicknessPrediction/FukeReproduction.h>
-#include <SprayThicknessPrediction/TanakaReproduction.h>
 #include <SprayThicknessPrediction/TzinavaReproduction.h>
 #include <SprayThicknessPrediction/VanerioReproduction.h>
 #include <SprayThicknessPrediction/WuReproduction.h>
@@ -15,7 +14,6 @@ namespace spraythickness
     enum class ReproductionAlgorithmKind
     {
         CurrentMethod,
-        Tanaka2024,
         Tzinava2020,
         Wu2020,
         Fuke2005,
@@ -27,7 +25,6 @@ namespace spraythickness
     const char* reproductionAlgorithmName(ReproductionAlgorithmKind algorithm);
 
     using PublishedReproductionInput = std::variant<
-        published::TanakaInputModel,
         published::TzinavaInputModel,
         published::WuInputModel,
         published::FukeInputModel,
@@ -35,7 +32,6 @@ namespace spraythickness
         published::DynamicSurfaceInputModel>;
 
     using PublishedReproductionParameters = std::variant<
-        published::TanakaParameters,
         published::TzinavaParameters,
         published::WuParameters,
         published::FukeParameters,
@@ -54,7 +50,6 @@ namespace spraythickness
 
     using PublishedReproductionNativeResult = std::variant<
         CurrentMethodReproductionResult,
-        published::TanakaResult,
         published::TzinavaResult,
         published::WuResult,
         published::FukeResult,
@@ -64,7 +59,7 @@ namespace spraythickness
     struct AlgorithmReproductionTask
     {
         ReproductionAlgorithmKind algorithm{
-            ReproductionAlgorithmKind::Tanaka2024 };
+            ReproductionAlgorithmKind::Tzinava2020 };
         PublishedReproductionInput input;
         PublishedReproductionParameters parameters;
     };
@@ -72,7 +67,7 @@ namespace spraythickness
     struct AlgorithmReproductionResult
     {
         ReproductionAlgorithmKind algorithm{
-            ReproductionAlgorithmKind::Tanaka2024 };
+            ReproductionAlgorithmKind::Tzinava2020 };
         PublishedReproductionNativeResult nativeResult;
     };
 

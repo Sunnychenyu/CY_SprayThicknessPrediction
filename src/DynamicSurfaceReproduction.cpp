@@ -32,6 +32,7 @@ namespace spraythickness::published
     {
         constexpr double kPi = 3.14159265358979323846;
         constexpr double kEpsilon = 1.0e-12;
+        constexpr std::size_t kMinimumReconstructionPointCount = 10;
         using Point = pcl::PointXYZ;
         using PointNormal = pcl::PointNormal;
         using Cloud = pcl::PointCloud<Point>;
@@ -50,6 +51,13 @@ namespace spraythickness::published
             Eigen::Vector3d origin = Eigen::Vector3d::Zero();
             Eigen::Vector3d axisX = Eigen::Vector3d::UnitX();
             Eigen::Vector3d axisY = Eigen::Vector3d::UnitY();
+        };
+
+        struct PreparedFeatureCloud
+        {
+            Cloud::Ptr cloud;
+            std::size_t sourcePointCount{ 0 };
+            std::size_t downsampledPointCount{ 0 };
         };
 
         double elapsedMilliseconds(
@@ -121,58 +129,140 @@ namespace spraythickness::published
             return samples;
         }
 
-        double circleOverlapArea(double radius, double distance)
+        double radicalInverse(std::size_t value, std::size_t base)
         {
-            if(distance >= 2.0 * radius) {
-                return 0.0;
+            double result = 0.0;
+            double place = 1.0 / static_cast<double>(base);
+            while(value != 0) {
+                result += static_cast<double>(value % base) * place;
+                value /= base;
+                place /= static_cast<double>(base);
             }
-            if(distance <= kEpsilon) {
-                return kPi * radius * radius;
-            }
-            const double ratio = std::clamp(distance / (2.0 * radius), 0.0, 1.0);
-            return 2.0 * radius * radius * std::acos(ratio)
-                - 0.5 * distance
-                    * std::sqrt(std::max(0.0,
-                        4.0 * radius * radius - distance * distance));
+            return result;
         }
 
-        void redistributePairwiseOverlap(
+        double sampledUnionVolume(
+            const std::vector<DynamicDepositedCylinder>& cylinders,
+            const std::vector<std::vector<std::size_t>>& neighbors,
+            const std::vector<std::size_t>& group, double heightScale)
+        {
+            constexpr std::size_t kSamplesPerCylinder = 256;
+            double unionVolume = 0.0;
+            std::vector<Eigen::Vector3d> axes;
+            axes.reserve(cylinders.size());
+            for(const DynamicDepositedCylinder& cylinder : cylinders) {
+                axes.push_back(cylinder.growthDirection.normalized());
+            }
+            for(const std::size_t index : group) {
+                const DynamicDepositedCylinder& cylinder = cylinders[index];
+                const Eigen::Vector3d& axis = axes[index];
+                Eigen::Vector3d basisX;
+                Eigen::Vector3d basisY;
+                localBasis(axis, basisX, basisY);
+                const double height = cylinder.heightMeters * heightScale;
+                const double sampleVolume = kPi * cylinder.radiusMeters
+                    * cylinder.radiusMeters * height / kSamplesPerCylinder;
+                for(std::size_t sample = 1;
+                    sample <= kSamplesPerCylinder; ++sample) {
+                    const double radius = cylinder.radiusMeters
+                        * std::sqrt(radicalInverse(sample, 2));
+                    const double angle = 2.0 * kPi * radicalInverse(sample, 3);
+                    const Eigen::Vector3d point = cylinder.baseCenter
+                        + height * radicalInverse(sample, 5) * axis
+                        + radius * (std::cos(angle) * basisX
+                            + std::sin(angle) * basisY);
+                    std::size_t coveringCount = 1;
+                    for(const std::size_t neighborIndex : neighbors[index]) {
+                        const DynamicDepositedCylinder& neighbor =
+                            cylinders[neighborIndex];
+                        const Eigen::Vector3d& neighborAxis =
+                            axes[neighborIndex];
+                        const Eigen::Vector3d relative =
+                            point - neighbor.baseCenter;
+                        const double axial = relative.dot(neighborAxis);
+                        if(axial < 0.0
+                            || axial > neighbor.heightMeters * heightScale) {
+                            continue;
+                        }
+                        if(relative.squaredNorm() - axial * axial
+                            <= neighbor.radiusMeters * neighbor.radiusMeters) {
+                            ++coveringCount;
+                        }
+                    }
+                    unionVolume += sampleVolume
+                        / static_cast<double>(coveringCount);
+                }
+            }
+            return unionVolume;
+        }
+
+        void redistributeOverlapVolume(
             std::vector<DynamicDepositedCylinder>& cylinders)
         {
             if(cylinders.size() < 2) {
                 return;
             }
-            std::vector<double> addedVolume(cylinders.size(), 0.0);
-            const Eigen::Vector3d axis =
+            const Eigen::Vector3d referenceAxis =
                 cylinders.front().growthDirection.normalized();
+            std::vector<std::vector<std::size_t>> neighbors(cylinders.size());
             for(std::size_t first = 0; first < cylinders.size(); ++first) {
                 for(std::size_t second = first + 1;
                     second < cylinders.size(); ++second) {
                     const Eigen::Vector3d delta =
                         cylinders[second].baseCenter - cylinders[first].baseCenter;
-                    const double radial = (delta - delta.dot(axis) * axis).norm();
-                    const double area = circleOverlapArea(
-                        cylinders[first].radiusMeters, radial);
-                    if(area <= 0.0) {
-                        continue;
+                    const double radial =
+                        (delta - delta.dot(referenceAxis) * referenceAxis).norm();
+                    if(radial < cylinders[first].radiusMeters
+                            + cylinders[second].radiusMeters) {
+                        neighbors[first].push_back(second);
+                        neighbors[second].push_back(first);
                     }
-                    const double firstStart =
-                        cylinders[first].baseCenter.dot(axis);
-                    const double secondStart =
-                        cylinders[second].baseCenter.dot(axis);
-                    const double overlapLength = std::max(0.0,
-                        std::min(firstStart + cylinders[first].heightMeters,
-                            secondStart + cylinders[second].heightMeters)
-                        - std::max(firstStart, secondStart));
-                    const double sharedVolume = area * overlapLength;
-                    addedVolume[first] += 0.5 * sharedVolume;
-                    addedVolume[second] += 0.5 * sharedVolume;
                 }
             }
-            for(std::size_t index = 0; index < cylinders.size(); ++index) {
-                const double baseArea = kPi * cylinders[index].radiusMeters
-                    * cylinders[index].radiusMeters;
-                cylinders[index].heightMeters += addedVolume[index] / baseArea;
+
+            std::vector<bool> visited(cylinders.size(), false);
+            for(std::size_t start = 0; start < cylinders.size(); ++start) {
+                if(visited[start]) {
+                    continue;
+                }
+                std::vector<std::size_t> group{ start };
+                visited[start] = true;
+                for(std::size_t cursor = 0; cursor < group.size(); ++cursor) {
+                    for(const std::size_t neighbor : neighbors[group[cursor]]) {
+                        if(!visited[neighbor]) {
+                            visited[neighbor] = true;
+                            group.push_back(neighbor);
+                        }
+                    }
+                }
+                if(group.size() < 2) {
+                    continue;
+                }
+                double targetVolume = 0.0;
+                for(const std::size_t index : group) {
+                    const DynamicDepositedCylinder& cylinder = cylinders[index];
+                    targetVolume += kPi * cylinder.radiusMeters
+                        * cylinder.radiusMeters * cylinder.heightMeters;
+                }
+                if(sampledUnionVolume(cylinders, neighbors, group, 1.0)
+                    >= targetVolume * (1.0 - 1.0e-6)) {
+                    continue;
+                }
+                double lower = 1.0;
+                double upper = static_cast<double>(group.size());
+                for(int iteration = 0; iteration < 20; ++iteration) {
+                    const double middle = 0.5 * (lower + upper);
+                    if(sampledUnionVolume(cylinders, neighbors, group, middle)
+                        < targetVolume) {
+                        lower = middle;
+                    } else {
+                        upper = middle;
+                    }
+                }
+                const double scale = 0.5 * (lower + upper);
+                for(const std::size_t index : group) {
+                    cylinders[index].heightMeters *= scale;
+                }
             }
         }
 
@@ -223,6 +313,40 @@ namespace spraythickness::published
                 }
             }
             return neighborhoods;
+        }
+
+        PreparedFeatureCloud prepareFeatureCloud(
+            const std::vector<DynamicDepositedCylinder>& cylinders,
+            const DynamicSurfaceParameters& parameters)
+        {
+            std::vector<Eigen::Vector3d> featurePoints;
+            featurePoints.reserve(cylinders.size());
+            for(const DynamicDepositedCylinder& cylinder : cylinders) {
+                featurePoints.push_back(cylinder.baseCenter
+                    + cylinder.heightMeters * cylinder.growthDirection);
+            }
+
+            PreparedFeatureCloud prepared;
+            prepared.sourcePointCount = featurePoints.size();
+            prepared.cloud = downsample(featurePoints, parameters);
+            prepared.downsampledPointCount = prepared.cloud->size();
+            while(prepared.cloud->size() >= 3) {
+                const auto neighborhoods =
+                    hybridNeighborhoods(prepared.cloud, parameters);
+                Cloud::Ptr dense(new Cloud);
+                dense->reserve(prepared.cloud->size());
+                for(std::size_t index = 0;
+                    index < prepared.cloud->size(); ++index) {
+                    if(neighborhoods[index].size() >= 3) {
+                        dense->push_back((*prepared.cloud)[index]);
+                    }
+                }
+                if(dense->size() == prepared.cloud->size()) {
+                    break;
+                }
+                prepared.cloud = std::move(dense);
+            }
+            return prepared;
         }
 
         std::vector<Eigen::Vector3d> estimateNormals(
@@ -283,7 +407,8 @@ namespace spraythickness::published
                     boundary[index] = true;
                     continue;
                 }
-                const double gradient = (angleSum / count)
+                const double gradient =
+                    (angleSum / neighborhoods[index].size())
                     / (distanceSum / count);
                 boundary[index] = gradient > threshold;
             }
@@ -293,7 +418,8 @@ namespace spraythickness::published
         std::vector<std::vector<int>> dbscan(
             const Cloud::Ptr& cloud,
             const std::vector<bool>& boundary,
-            const DynamicSurfaceParameters& parameters)
+            const DynamicSurfaceParameters& parameters,
+            const ReproductionExecution& execution)
         {
             pcl::KdTreeFLANN<Point> tree;
             tree.setInputCloud(cloud);
@@ -363,9 +489,38 @@ namespace spraythickness::published
                     clusters[labels[index]].push_back(static_cast<int>(index));
                 }
             }
+            std::size_t skippedClusters = 0;
+            std::size_t skippedPoints = 0;
+            std::size_t largestCluster = 0;
+            for(const auto& cluster : clusters) {
+                largestCluster = std::max(largestCluster, cluster.size());
+                if(cluster.size() < kMinimumReconstructionPointCount) {
+                    ++skippedClusters;
+                    skippedPoints += cluster.size();
+                }
+            }
             clusters.erase(std::remove_if(clusters.begin(), clusters.end(),
-                [](const auto& cluster) { return cluster.size() < 3; }),
+                [](const auto& cluster) {
+                    return cluster.size() < kMinimumReconstructionPointCount;
+                }),
                 clusters.end());
+            if(skippedClusters != 0) {
+                reportDiagnostic(execution, "Point-cloud reconstruction",
+                    "DBSCAN skipped " + std::to_string(skippedClusters)
+                        + " regions with fewer than "
+                        + std::to_string(kMinimumReconstructionPointCount)
+                        + " points (" + std::to_string(skippedPoints)
+                        + " points); reconstructable regions="
+                        + std::to_string(clusters.size()));
+            }
+            if(clusters.empty()) {
+                throw std::runtime_error(
+                    "Dynamic-surface DBSCAN found no region with at least "
+                    + std::to_string(kMinimumReconstructionPointCount)
+                    + " points (largest region="
+                    + std::to_string(largestCluster) + ", skipped regions="
+                    + std::to_string(skippedClusters) + ").");
+            }
             return clusters;
         }
 
@@ -539,7 +694,7 @@ namespace spraythickness::published
                 value.normal_z = static_cast<float>(normals[index].z());
                 pointsWithNormals->push_back(value);
             }
-            if(points->size() < 10) {
+            if(points->size() < kMinimumReconstructionPointCount) {
                 throw std::runtime_error(
                     "Dynamic-surface reconstruction region contains fewer than ten points.");
             }
@@ -729,12 +884,23 @@ namespace spraythickness::published
         }
 
         TriangleMesh mergeRegions(const TriangleMesh& current,
-            const std::vector<ReconstructedRegion>& regions)
+            const std::vector<ReconstructedRegion>& regions,
+            const std::vector<std::size_t>& sourceFaces,
+            std::size_t substrateFaceCount)
         {
             TriangleMesh result;
             result.vertices = current.vertices;
+            const std::unordered_set<std::size_t> depositedFaces(
+                sourceFaces.begin(), sourceFaces.end());
             for(std::size_t faceIndex = 0;
                 faceIndex < current.faces.size(); ++faceIndex) {
+                // Keep the original substrate behind reconstructed patches so
+                // sparse reconstruction cannot expose a deeper occluded surface.
+                if(faceIndex < substrateFaceCount
+                    || depositedFaces.count(faceIndex) == 0) {
+                    result.faces.push_back(current.faces[faceIndex]);
+                    continue;
+                }
                 const Eigen::Vector3d center = faceCentroid(current, faceIndex);
                 bool replaced = false;
                 for(const ReconstructedRegion& region : regions) {
@@ -767,27 +933,36 @@ namespace spraythickness::published
 
         TriangleMesh reconstructSurface(const TriangleMesh& current,
             const std::vector<DynamicDepositedCylinder>& batch,
+            const std::vector<std::size_t>& sourceFaces,
+            std::size_t substrateFaceCount,
             const Eigen::Vector3d& nozzlePosition,
             const Eigen::Vector3d& nozzleAxis,
-            const DynamicSurfaceParameters& parameters)
+            const DynamicSurfaceParameters& parameters,
+            const PreparedFeatureCloud& prepared,
+            const ReproductionExecution& execution)
         {
-            std::vector<Eigen::Vector3d> featurePoints;
-            featurePoints.reserve(batch.size());
-            for(const DynamicDepositedCylinder& cylinder : batch) {
-                featurePoints.push_back(cylinder.baseCenter
-                    + cylinder.heightMeters * cylinder.growthDirection);
-            }
-            Cloud::Ptr cloud = downsample(featurePoints, parameters);
-            if(cloud->size() < 10) {
+            Cloud::Ptr cloud = prepared.cloud;
+            if(cloud->size() < kMinimumReconstructionPointCount) {
                 throw std::runtime_error(
-                    "Dynamic-surface downsampling retained fewer than ten feature points.");
+                    "Dynamic-surface local-density filtering retained "
+                    + std::to_string(cloud->size()) + " of "
+                    + std::to_string(prepared.downsampledPointCount)
+                    + " downsampled feature points from "
+                    + std::to_string(prepared.sourcePointCount)
+                    + " deposited cylinders (minimum 10; voxel leaf="
+                    + std::to_string(parameters.voxelLeafMeters)
+                    + " m, uniform radius="
+                    + std::to_string(parameters.uniformSamplingRadiusMeters)
+                    + " m, normal radius="
+                    + std::to_string(parameters.normalSearchRadiusMeters)
+                    + " m).");
             }
             const auto neighborhoods = hybridNeighborhoods(cloud, parameters);
             const auto normals = estimateNormals(
                 cloud, neighborhoods, nozzlePosition);
             const auto boundary = detectBoundary(cloud, neighborhoods, normals,
                 parameters.boundaryGradientThresholdRadiansPerMeter);
-            const auto clusters = dbscan(cloud, boundary, parameters);
+            const auto clusters = dbscan(cloud, boundary, parameters, execution);
             std::vector<ReconstructedRegion> regions;
             regions.reserve(clusters.size());
 
@@ -839,7 +1014,8 @@ namespace spraythickness::published
                 regions.push_back(reconstructCluster(cloud, normals, boundary,
                     cluster, localReference, nozzlePosition, parameters));
             }
-            return mergeRegions(current, regions);
+            return mergeRegions(current, regions, sourceFaces,
+                substrateFaceCount);
         }
     }
 
@@ -847,6 +1023,12 @@ namespace spraythickness::published
     {
         relativeBuildUpByInclinationRadians.validate(
             "Dynamic-surface relative build-up rate Rbu");
+        if(!std::isnan(relativeBuildUpQuadraticPerDegreeSquared)
+            && (!std::isfinite(relativeBuildUpQuadraticPerDegreeSquared)
+                || relativeBuildUpQuadraticPerDegreeSquared <= 0.0)) {
+            throw std::invalid_argument(
+                "Dynamic-surface Rbu quadratic coefficient must be positive.");
+        }
         const std::vector<double> positiveValues{
             equivalentParticleDiameterMeters,
             depositedCylinderRadiusMeters,
@@ -885,6 +1067,10 @@ namespace spraythickness::published
         const DynamicSurfaceParameters& parameters,
         const ReproductionExecution& execution)
     {
+        reportDiagnostic(execution, "Input validation",
+            "surface faces=" + std::to_string(input.initialStlSurface.faces.size())
+                + ", timed poses="
+                + std::to_string(input.nozzleTrajectory.size()));
         parameters.validate();
         input.initialStlSurface.validate();
         if(input.nozzleTrajectory.size() < 2) {
@@ -897,7 +1083,8 @@ namespace spraythickness::published
         result.statistics.trajectorySampleCount = input.nozzleTrajectory.size();
         result.implementationNotes.push_back(
             "The paper does not publish the overlap-volume solver; parallel-cylinder "
-            "pair intersections are redistributed equally to the participating cylinders.");
+            "groups use deterministic union-volume sampling and a uniform height "
+            "correction to conserve deposited volume numerically.");
         result.implementationNotes.push_back(
             "The paper does not publish hole-repair and feature-smoothing numerical details; "
             "configured small boundary loops are closed by centroid triangle fans, and "
@@ -906,8 +1093,15 @@ namespace spraythickness::published
             "Subregions use the central-ray reference point or the paper's Eq. (19) virtual "
             "reference point; if no Alpha Shape loop contains it, the nearest loop centroid is selected.");
 
+        reportDiagnostic(execution, "Direction sampling",
+            "polar bins=" + std::to_string(parameters.polarBinCount));
         const std::vector<DirectionSample> directions =
             makeDirectionSamples(parameters);
+        reportDiagnostic(execution, "Ray deposition",
+            "sampled directions=" + std::to_string(directions.size())
+                + ", particle rate="
+                + std::to_string(parameters.equivalentParticleRatePerSecond)
+                + " /s");
         std::vector<double> probabilities;
         probabilities.reserve(directions.size());
         for(const DirectionSample& direction : directions) {
@@ -921,6 +1115,95 @@ namespace spraythickness::published
         const double baseCylinderHeight = sphereVolume
             / (kPi * parameters.depositedCylinderRadiusMeters
                 * parameters.depositedCylinderRadiusMeters);
+        bool overlapStageReported = false;
+        bool reconstructionStageReported = false;
+        struct DepositionBatch
+        {
+            std::vector<DynamicDepositedCylinder> cylinders;
+            std::vector<std::size_t> sourceFaces;
+            Eigen::Vector3d nozzlePositionSum = Eigen::Vector3d::Zero();
+            Eigen::Vector3d nozzleAxisSum = Eigen::Vector3d::Zero();
+            double durationSeconds{ 0.0 };
+            std::size_t firstPoseIndex{ 0 };
+        };
+        DepositionBatch pending;
+        DepositionBatch previousBatch;
+        TriangleMesh surfaceBeforePreviousBatch;
+        std::size_t completedBatchCount = 0;
+        double particleRemainder = 0.0;
+        double nextBatchCheckSeconds = parameters.depositionBatchDurationSeconds;
+
+        PreparedFeatureCloud lastPrepared;
+        const auto reconstructBatch = [&]() {
+            if(pending.cylinders.empty()) {
+                return false;
+            }
+            std::vector<DynamicDepositedCylinder> adjusted =
+                pending.cylinders;
+            redistributeOverlapVolume(adjusted);
+            lastPrepared = prepareFeatureCloud(adjusted, parameters);
+            if(lastPrepared.cloud->size()
+                < kMinimumReconstructionPointCount) {
+                reportDiagnostic(execution, "Point-cloud reconstruction",
+                    "batch deferred: input="
+                        + std::to_string(lastPrepared.sourcePointCount)
+                        + ", downsampled="
+                        + std::to_string(lastPrepared.downsampledPointCount)
+                        + ", locally dense="
+                        + std::to_string(lastPrepared.cloud->size()));
+                return false;
+            }
+            previousBatch = pending;
+            surfaceBeforePreviousBatch = result.evolvedStlSurface;
+            if(!overlapStageReported) {
+                reportDiagnostic(execution, "Overlap redistribution",
+                    "first accumulated batch="
+                        + std::to_string(pending.cylinders.size())
+                        + " deposited cylinders");
+                overlapStageReported = true;
+            }
+            if(!reconstructionStageReported) {
+                reportDiagnostic(execution, "Point-cloud reconstruction",
+                    "first accumulated batch="
+                        + std::to_string(adjusted.size())
+                        + " input feature points, downsampled="
+                        + std::to_string(lastPrepared.downsampledPointCount)
+                        + ", locally dense="
+                        + std::to_string(lastPrepared.cloud->size())
+                        + ", sparse removed="
+                        + std::to_string(
+                            lastPrepared.downsampledPointCount
+                            - lastPrepared.cloud->size()));
+                reconstructionStageReported = true;
+            }
+            const Eigen::Vector3d nozzlePosition =
+                pending.nozzlePositionSum
+                / static_cast<double>(pending.cylinders.size());
+            const Eigen::Vector3d nozzleAxis =
+                pending.nozzleAxisSum.norm() > kEpsilon
+                ? pending.nozzleAxisSum.normalized()
+                : -pending.cylinders.front().growthDirection;
+            try {
+                result.evolvedStlSurface = reconstructSurface(
+                    result.evolvedStlSurface, adjusted, pending.sourceFaces,
+                    input.initialStlSurface.faces.size(),
+                    nozzlePosition, nozzleAxis, parameters, lastPrepared,
+                    execution);
+            } catch(const std::exception& exception) {
+                throw std::runtime_error(
+                    "Dynamic-surface reconstruction at pose "
+                    + std::to_string(pending.firstPoseIndex + 1)
+                    + ", batch " + std::to_string(completedBatchCount + 1)
+                    + ": " + exception.what());
+            }
+            result.statistics.candidatePairCount += adjusted.size();
+            result.depositedCylinders.insert(result.depositedCylinders.end(),
+                adjusted.begin(), adjusted.end());
+            ++completedBatchCount;
+            pending = {};
+            nextBatchCheckSeconds = parameters.depositionBatchDurationSeconds;
+            return true;
+        };
 
         for(std::size_t poseIndex = 0;
             poseIndex + 1 < input.nozzleTrajectory.size(); ++poseIndex) {
@@ -946,15 +1229,17 @@ namespace spraythickness::published
             const std::size_t batchCount = std::max<std::size_t>(1,
                 static_cast<std::size_t>(std::ceil(
                     interval / parameters.depositionBatchDurationSeconds)));
-            const std::size_t totalParticles = static_cast<std::size_t>(
-                std::llround(parameters.equivalentParticleRatePerSecond * interval));
             for(std::size_t batchIndex = 0;
                 batchIndex < batchCount; ++batchIndex) {
-                const std::size_t begin = totalParticles * batchIndex / batchCount;
-                const std::size_t end = totalParticles * (batchIndex + 1) / batchCount;
-                std::vector<DynamicDepositedCylinder> batch;
-                batch.reserve(end - begin);
-                for(std::size_t particle = begin; particle < end; ++particle) {
+                const double duration = interval / batchCount;
+                particleRemainder +=
+                    parameters.equivalentParticleRatePerSecond * duration;
+                const std::size_t particleCount = static_cast<std::size_t>(
+                    std::floor(particleRemainder + 1.0e-9));
+                particleRemainder -= static_cast<double>(particleCount);
+                pending.durationSeconds += duration;
+                for(std::size_t particle = 0;
+                    particle < particleCount; ++particle) {
                     const DirectionSample& sample =
                         directions[selectDirection(generator)];
                     const Eigen::Vector3d direction =
@@ -969,33 +1254,101 @@ namespace spraythickness::published
                     }
                     const double inclination = std::acos(std::clamp(
                         std::abs(hit.normal.dot(axis)), 0.0, 1.0));
-                    const double buildUp =
-                        parameters.relativeBuildUpByInclinationRadians.interpolate(
-                            inclination,
-                            "Dynamic-surface relative build-up rate Rbu");
+                    const double inclinationDegrees = inclination * 180.0 / kPi;
+                    double buildUp = 0.0;
+                    if(std::isfinite(
+                            parameters.relativeBuildUpQuadraticPerDegreeSquared)) {
+                        if(inclination
+                            > parameters.relativeBuildUpByInclinationRadians.arguments.back()
+                                + kEpsilon) {
+                            throw std::out_of_range(
+                                "Dynamic-surface Rbu angle exceeds its measured range.");
+                        }
+                        buildUp = 1.0
+                            - parameters.relativeBuildUpQuadraticPerDegreeSquared
+                                * inclinationDegrees * inclinationDegrees;
+                    } else {
+                        buildUp =
+                            parameters.relativeBuildUpByInclinationRadians.interpolate(
+                                inclination,
+                                "Dynamic-surface relative build-up rate Rbu");
+                    }
                     if(buildUp <= 0.0) {
                         continue;
                     }
-                    batch.push_back({ hit.position, -axis,
+                    if(pending.cylinders.empty()) {
+                        pending.firstPoseIndex = poseIndex;
+                    }
+                    pending.cylinders.push_back({ hit.position, -axis,
                         parameters.depositedCylinderRadiusMeters,
                         baseCylinderHeight * buildUp });
+                    pending.sourceFaces.push_back(hit.faceIndex);
+                    pending.nozzlePositionSum += pose.position;
+                    pending.nozzleAxisSum += axis;
                 }
-                if(batch.empty()) {
-                    continue;
+                if(!pending.cylinders.empty()
+                    && pending.durationSeconds >= nextBatchCheckSeconds) {
+                    if(pending.cylinders.size()
+                            >= kMinimumReconstructionPointCount
+                        && reconstructBatch()) {
+                        continue;
+                    } else {
+                        nextBatchCheckSeconds +=
+                            parameters.depositionBatchDurationSeconds;
+                    }
                 }
-                redistributePairwiseOverlap(batch);
-                result.evolvedStlSurface = reconstructSurface(
-                    result.evolvedStlSurface, batch, pose.position, axis,
-                    parameters);
-                result.depositedCylinders.insert(
-                    result.depositedCylinders.end(), batch.begin(), batch.end());
-                result.statistics.candidatePairCount += batch.size();
             }
             reportProgress(execution,
                 static_cast<double>(poseIndex + 1)
                     / static_cast<double>(input.nozzleTrajectory.size() - 1),
                 "Dynamic surface evolution reproduction");
         }
+        if(!result.canceled && !pending.cylinders.empty()) {
+            if(!reconstructBatch() && !previousBatch.cylinders.empty()) {
+                result.evolvedStlSurface =
+                    std::move(surfaceBeforePreviousBatch);
+                result.depositedCylinders.resize(
+                    result.depositedCylinders.size()
+                    - previousBatch.cylinders.size());
+                result.statistics.candidatePairCount -=
+                    previousBatch.cylinders.size();
+                previousBatch.cylinders.insert(
+                    previousBatch.cylinders.end(),
+                    pending.cylinders.begin(), pending.cylinders.end());
+                for(const auto& cylinder : pending.cylinders) {
+                    RayHit sourceHit;
+                    const Eigen::Vector3d growth =
+                        cylinder.growthDirection.normalized();
+                    if(nearestRayHit(result.evolvedStlSurface,
+                            cylinder.baseCenter + 1.0e-6 * growth,
+                            -growth, sourceHit)) {
+                        previousBatch.sourceFaces.push_back(sourceHit.faceIndex);
+                    }
+                }
+                previousBatch.nozzlePositionSum += pending.nozzlePositionSum;
+                previousBatch.nozzleAxisSum += pending.nozzleAxisSum;
+                previousBatch.durationSeconds += pending.durationSeconds;
+                pending = std::move(previousBatch);
+                --completedBatchCount;
+            }
+            if(!pending.cylinders.empty() && !reconstructBatch()) {
+                throw std::runtime_error(
+                    "Dynamic-surface reconstruction at pose "
+                    + std::to_string(pending.firstPoseIndex + 1)
+                    + ", batch " + std::to_string(completedBatchCount + 1)
+                    + ": local-density filtering retained "
+                    + std::to_string(lastPrepared.cloud->size()) + " of "
+                    + std::to_string(lastPrepared.downsampledPointCount)
+                    + " downsampled feature points from "
+                    + std::to_string(lastPrepared.sourcePointCount)
+                    + " deposited cylinders (minimum 10)." );
+            }
+        }
+        reportDiagnostic(execution, "Result assembly",
+            "deposited cylinders="
+                + std::to_string(result.depositedCylinders.size())
+                + ", evolved surface faces="
+                + std::to_string(result.evolvedStlSurface.faces.size()));
         result.statistics.evaluatedElementCount =
             result.evolvedStlSurface.faces.size();
         result.statistics.elapsedMilliseconds = elapsedMilliseconds(started);

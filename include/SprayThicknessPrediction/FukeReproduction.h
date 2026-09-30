@@ -19,6 +19,7 @@ namespace spraythickness::published
         std::vector<FukePolygon> polygons;
         std::vector<double> timesSeconds;
         std::vector<Eigen::Isometry3d> workpiecePoses;
+        std::vector<bool> sprayEnabled;
         Eigen::Vector3d vaporSourcePosition = Eigen::Vector3d::Zero();
         Eigen::Vector3d vaporSourceNormal = Eigen::Vector3d::UnitZ();
     };

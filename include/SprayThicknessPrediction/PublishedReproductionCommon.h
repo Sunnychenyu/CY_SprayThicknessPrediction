@@ -36,6 +36,7 @@ namespace spraythickness::published
     {
         const std::atomic_bool* cancelRequested{ nullptr };
         std::function<void(double, const std::string&)> progress;
+        std::function<void(const std::string&, const std::string&)> diagnostic;
     };
 
     struct ReproductionStatistics
@@ -79,6 +80,10 @@ namespace spraythickness::published
         const ReproductionExecution& execution,
         double value,
         const std::string& message);
+    void reportDiagnostic(
+        const ReproductionExecution& execution,
+        const std::string& stage,
+        const std::string& details);
 
     Eigen::Vector3d faceNormal(
         const TriangleMesh& mesh,

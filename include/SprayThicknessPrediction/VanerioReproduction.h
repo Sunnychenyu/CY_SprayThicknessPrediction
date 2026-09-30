@@ -33,6 +33,7 @@ namespace spraythickness::published
     struct VanerioResult
     {
         TriangleMesh evolvedStlSurface;
+        std::vector<double> vertexThicknessMeters;
         ReproductionStatistics statistics;
         std::vector<std::string> implementationNotes;
         bool canceled{ false };

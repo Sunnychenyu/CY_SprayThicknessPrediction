@@ -32,6 +32,8 @@ namespace spraythickness::published
             std::numeric_limits<double>::quiet_NaN() };
         std::uint32_t randomSeed{ 0 };
         TabulatedCurve relativeBuildUpByInclinationRadians;
+        double relativeBuildUpQuadraticPerDegreeSquared{
+            std::numeric_limits<double>::quiet_NaN() };
 
         double voxelLeafMeters{ std::numeric_limits<double>::quiet_NaN() };
         double uniformSamplingRadiusMeters{

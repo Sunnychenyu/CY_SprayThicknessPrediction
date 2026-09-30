@@ -52,6 +52,7 @@ namespace spraythickness::published
             std::array<Eigen::Vector2d, 3> projected;
             double standOffDistance{ 0.0 };
             double impactAngleDegrees{ 0.0 };
+            double facingCosine{ 0.0 };
             double radialDistance{ 0.0 };
             double spotSpeedMetersPerSecond{ 0.0 };
             double projectedNormalDotAxis{ 1.0 };
@@ -165,15 +166,24 @@ namespace spraythickness::published
             return output;
         }
 
+        std::size_t trajectorySegmentAt(
+            const std::vector<SprayPose>& trajectory,
+            double time)
+        {
+            const auto next = std::upper_bound(trajectory.begin() + 1,
+                trajectory.end(), time,
+                [](double value, const SprayPose& pose) {
+                    return value < pose.timeSeconds;
+                });
+            return std::min(static_cast<std::size_t>(
+                next - trajectory.begin() - 1), trajectory.size() - 2);
+        }
+
         GunState gunStateAt(
             const std::vector<SprayPose>& trajectory,
             double time)
         {
-            std::size_t segment = 0;
-            while(segment + 2 < trajectory.size()
-                && trajectory[segment + 1].timeSeconds < time) {
-                ++segment;
-            }
+            const std::size_t segment = trajectorySegmentAt(trajectory, time);
             const SprayPose& first = trajectory[segment];
             const SprayPose& second = trajectory[segment + 1];
             const double duration = second.timeSeconds - first.timeSeconds;
@@ -230,56 +240,86 @@ namespace spraythickness::published
             const Eigen::Vector2d& point,
             const std::array<Eigen::Vector2d, 3>& triangle)
         {
+            if(std::abs(orientation(triangle[0], triangle[1], triangle[2]))
+                <= kEpsilon) {
+                return false;
+            }
             const double first = orientation(triangle[0], triangle[1], point);
             const double second = orientation(triangle[1], triangle[2], point);
             const double third = orientation(triangle[2], triangle[0], point);
-            const bool hasNegative = first < -kEpsilon || second < -kEpsilon
-                || third < -kEpsilon;
-            const bool hasPositive = first > kEpsilon || second > kEpsilon
-                || third > kEpsilon;
-            return !(hasNegative && hasPositive);
+            return (first > kEpsilon && second > kEpsilon
+                    && third > kEpsilon)
+                || (first < -kEpsilon && second < -kEpsilon
+                    && third < -kEpsilon);
         }
 
-        bool segmentsIntersect(
-            const Eigen::Vector2d& a,
-            const Eigen::Vector2d& b,
-            const Eigen::Vector2d& c,
-            const Eigen::Vector2d& d)
+        bool edgesIntersect(const Eigen::Vector2d& first,
+            const Eigen::Vector2d& second,
+            const Eigen::Vector2d& third,
+            const Eigen::Vector2d& fourth)
         {
-            const double abC = orientation(a, b, c);
-            const double abD = orientation(a, b, d);
-            const double cdA = orientation(c, d, a);
-            const double cdB = orientation(c, d, b);
-            return abC * abD <= kEpsilon && cdA * cdB <= kEpsilon;
+            if(std::max(std::min(first.x(), second.x()),
+                    std::min(third.x(), fourth.x()))
+                    > std::min(std::max(first.x(), second.x()),
+                        std::max(third.x(), fourth.x())) + kEpsilon
+                || std::max(std::min(first.y(), second.y()),
+                    std::min(third.y(), fourth.y()))
+                    > std::min(std::max(first.y(), second.y()),
+                        std::max(third.y(), fourth.y())) + kEpsilon) {
+                return false;
+            }
+            const double a = orientation(first, second, third);
+            const double b = orientation(first, second, fourth);
+            const double c = orientation(third, fourth, first);
+            const double d = orientation(third, fourth, second);
+            return ((a > kEpsilon && b < -kEpsilon)
+                    || (a < -kEpsilon && b > kEpsilon))
+                && ((c > kEpsilon && d < -kEpsilon)
+                    || (c < -kEpsilon && d > kEpsilon));
         }
 
-        bool trianglesIntersect(
+        bool projectedTrianglesIntersect(
             const std::array<Eigen::Vector2d, 3>& first,
             const std::array<Eigen::Vector2d, 3>& second)
         {
-            Eigen::AlignedBox2d firstBounds;
-            Eigen::AlignedBox2d secondBounds;
-            for(int i = 0; i < 3; ++i) {
-                firstBounds.extend(first[i]);
-                secondBounds.extend(second[i]);
-            }
-            if(!firstBounds.intersects(secondBounds)) {
+            if(std::abs(orientation(first[0], first[1], first[2]))
+                    <= kEpsilon
+                || std::abs(orientation(second[0], second[1], second[2]))
+                    <= kEpsilon) {
                 return false;
             }
-            for(const Eigen::Vector2d& point : first) {
-                if(pointInsideTriangle(point, second)) {
+            for(int component = 0; component < 2; ++component) {
+                const double firstMin = std::min({ first[0][component],
+                    first[1][component], first[2][component] });
+                const double firstMax = std::max({ first[0][component],
+                    first[1][component], first[2][component] });
+                const double secondMin = std::min({ second[0][component],
+                    second[1][component], second[2][component] });
+                const double secondMax = std::max({ second[0][component],
+                    second[1][component], second[2][component] });
+                if(firstMax < secondMin - kEpsilon
+                    || secondMax < firstMin - kEpsilon) {
+                    return false;
+                }
+            }
+            for(int corner = 0; corner < 3; ++corner) {
+                if(pointInsideTriangle(first[corner], second)
+                    || pointInsideTriangle(second[corner], first)) {
                     return true;
                 }
             }
-            for(const Eigen::Vector2d& point : second) {
-                if(pointInsideTriangle(point, first)) {
-                    return true;
-                }
+            const Eigen::Vector2d firstCenter =
+                (first[0] + first[1] + first[2]) / 3.0;
+            const Eigen::Vector2d secondCenter =
+                (second[0] + second[1] + second[2]) / 3.0;
+            if(pointInsideTriangle(firstCenter, second)
+                || pointInsideTriangle(secondCenter, first)) {
+                return true;
             }
-            for(int i = 0; i < 3; ++i) {
-                for(int j = 0; j < 3; ++j) {
-                    if(segmentsIntersect(first[i], first[(i + 1) % 3],
-                            second[j], second[(j + 1) % 3])) {
+            for(int firstEdge = 0; firstEdge < 3; ++firstEdge) {
+                for(int secondEdge = 0; secondEdge < 3; ++secondEdge) {
+                    if(edgesIntersect(first[firstEdge], first[(firstEdge + 1) % 3],
+                            second[secondEdge], second[(secondEdge + 1) % 3])) {
                         return true;
                     }
                 }
@@ -304,7 +344,9 @@ namespace spraythickness::published
             const TriangleMesh& mesh,
             const GunState& gun,
             const TzinavaInputModel& input,
-            const TzinavaParameters& parameters)
+            const TzinavaParameters& parameters,
+            bool checkVisibility,
+            std::size_t* visibilityQueryCount = nullptr)
         {
             const Eigen::Vector3d axis = gun.axis.normalized();
             Eigen::Vector3d basisX;
@@ -321,6 +363,7 @@ namespace spraythickness::published
                 }
                 const Eigen::Vector3d radial = relative - axialDistance * axis;
                 const double beamRadius = beamRadiusAt(parameters, axialDistance);
+                const auto& face = mesh.faces[faceIndex];
                 if(radial.norm() > beamRadius) {
                     continue;
                 }
@@ -328,12 +371,11 @@ namespace spraythickness::published
                 candidate.faceIndex = faceIndex;
                 candidate.centroid = centroid;
                 candidate.normal = faceNormal(mesh, faceIndex);
+                candidate.facingCosine = -candidate.normal.dot(axis);
                 candidate.standOffDistance = relative.norm();
                 candidate.radialDistance = radial.norm();
-                candidate.impactAngleDegrees = 90.0
-                    - std::acos(std::clamp(
-                        std::abs(candidate.normal.dot(axis)), 0.0, 1.0))
-                        * 180.0 / kPi;
+                candidate.impactAngleDegrees = std::asin(std::clamp(
+                    candidate.facingCosine, 0.0, 1.0)) * 180.0 / kPi;
 
                 const Eigen::Vector3d rotationVelocity =
                     input.objectAngularSpeedRadiansPerSecond
@@ -352,7 +394,6 @@ namespace spraythickness::published
                             planeNormal.norm() / candidate.projectedNormalDotAxis;
                     }
                 }
-                const auto& face = mesh.faces[faceIndex];
                 for(int corner = 0; corner < 3; ++corner) {
                     const Eigen::Vector3d local =
                         mesh.vertices[face[corner]] - gun.position;
@@ -361,20 +402,24 @@ namespace spraythickness::published
                 }
                 output.push_back(candidate);
             }
+            if(!checkVisibility) {
+                return output;
+            }
             std::sort(output.begin(), output.end(),
                 [](const Candidate& first, const Candidate& second) {
-                    return first.standOffDistance > second.standOffDistance;
+                    return first.standOffDistance < second.standOffDistance;
                 });
-            for(std::size_t farIndex = 0; farIndex < output.size(); ++farIndex) {
-                for(std::size_t nearIndex = output.size();
-                    nearIndex-- > farIndex + 1;) {
-                    if(output[nearIndex].standOffDistance
-                            >= output[farIndex].standOffDistance - 1.0e-9) {
-                        continue;
+            for(std::size_t targetIndex = 0;
+                targetIndex < output.size(); ++targetIndex) {
+                for(std::size_t otherIndex = 0;
+                    otherIndex < targetIndex; ++otherIndex) {
+                    if(visibilityQueryCount != nullptr) {
+                        ++*visibilityQueryCount;
                     }
-                    if(trianglesIntersect(output[farIndex].projected,
-                            output[nearIndex].projected)) {
-                        output[farIndex].hidden = true;
+                    if(projectedTrianglesIntersect(
+                            output[targetIndex].projected,
+                            output[otherIndex].projected)) {
+                        output[targetIndex].hidden = true;
                         break;
                     }
                 }
@@ -390,6 +435,7 @@ namespace spraythickness::published
             double timeStep = std::numeric_limits<double>::infinity();
             for(const Candidate& candidate : visibleCandidates) {
                 if(candidate.hidden
+                    || candidate.facingCosine <= kEpsilon
                     || candidate.spotSpeedMetersPerSecond <= kEpsilon
                     || candidate.projectedNormalDotAxis <= kEpsilon) {
                     continue;
@@ -503,11 +549,22 @@ namespace spraythickness::published
         const TzinavaParameters& parameters,
         const ReproductionExecution& execution)
     {
+        reportDiagnostic(execution, "Input validation",
+            "mesh faces=" + std::to_string(input.initialMesh.faces.size())
+                + ", gun poses=" + std::to_string(input.gunTrajectory.size()));
         parameters.validate();
         input.initialMesh.validate();
         if(input.gunTrajectory.size() < 2) {
             throw std::invalid_argument(
                 "Tzinava reproduction requires at least two gun poses.");
+        }
+        if(std::adjacent_find(input.gunTrajectory.begin(),
+                input.gunTrajectory.end(),
+                [](const SprayPose& first, const SprayPose& second) {
+                    return second.timeSeconds <= first.timeSeconds;
+                }) != input.gunTrajectory.end()) {
+            throw std::invalid_argument(
+                "Tzinava gun trajectory times must be strictly increasing.");
         }
         if(input.objectRotationAxis.squaredNorm() <= kEpsilon) {
             throw std::invalid_argument("Tzinava object rotation axis is zero.");
@@ -515,22 +572,50 @@ namespace spraythickness::published
 
         const auto started = std::chrono::steady_clock::now();
         TzinavaResult result;
+        reportDiagnostic(execution, "Mesh subdivision",
+            "initial faces=" + std::to_string(input.initialMesh.faces.size()));
         result.subdividedMesh = subdivide(
             input.initialMesh, parameters.beamRadiusMeters);
+        reportDiagnostic(execution, "Candidate search and deposition",
+            "subdivided faces="
+                + std::to_string(result.subdividedMesh.faces.size()));
         result.faceThicknessMeters.assign(
             result.subdividedMesh.faces.size(), 0.0);
         result.faceCentroids.resize(result.subdividedMesh.faces.size());
+        std::vector<double> passagePeak(result.subdividedMesh.faces.size(), 0.0);
+        std::vector<std::size_t> lastVisibleStep(
+            result.subdividedMesh.faces.size(), 0);
+        std::vector<std::size_t> lastVisiblePass(
+            result.subdividedMesh.faces.size(), 0);
         result.statistics.evaluatedElementCount =
             result.subdividedMesh.faces.size();
-        std::vector<bool> seenPrevious(result.subdividedMesh.faces.size(), false);
 
         double time = input.gunTrajectory.front().timeSeconds;
         const double endTime = input.gunTrajectory.back().timeSeconds;
+        std::size_t previousSegment = 0;
+        std::size_t movingPass = 0;
         while(time < endTime - kEpsilon) {
             if(canceled(execution)) {
                 result.canceled = true;
                 break;
             }
+            const std::size_t segment = trajectorySegmentAt(
+                input.gunTrajectory, time);
+            for(std::size_t boundary = previousSegment + 1;
+                boundary <= segment; ++boundary) {
+                const SprayPose& before = input.gunTrajectory[boundary - 1];
+                const SprayPose& turn = input.gunTrajectory[boundary];
+                const SprayPose& after = input.gunTrajectory[boundary + 1];
+                const Eigen::Vector3d inbound = turn.position - before.position;
+                const Eigen::Vector3d outbound = after.position - turn.position;
+                if((!before.sprayEnabled && turn.sprayEnabled)
+                    || (inbound.squaredNorm() > kEpsilon
+                        && outbound.squaredNorm() > kEpsilon
+                        && inbound.dot(outbound) < 0.0)) {
+                    ++movingPass;
+                }
+            }
+            previousSegment = segment;
             const GunState gun = gunStateAt(input.gunTrajectory, time);
             const TriangleMesh currentMesh = rotatedMesh(
                 result.subdividedMesh,
@@ -538,16 +623,18 @@ namespace spraythickness::published
                 input.objectRotationAxis,
                 input.objectAngularSpeedRadiansPerSecond
                     * (time - input.gunTrajectory.front().timeSeconds));
-            std::vector<Candidate> currentCandidates = candidates(
-                currentMesh, gun, input, parameters);
+            const std::vector<Candidate> currentCandidates = candidates(
+                currentMesh, gun, input, parameters, true,
+                &result.statistics.visibilityQueryCount);
             double dt = adaptiveTimeStep(currentCandidates, gun, parameters);
-            dt = std::min(dt, endTime - time);
+            dt = std::min({ dt,
+                input.gunTrajectory[segment + 1].timeSeconds - time,
+                endTime - time });
             if(!std::isfinite(dt) || dt <= 0.0) {
                 throw std::runtime_error(
                     "Tzinava adaptive time step is not positive.");
             }
 
-            std::vector<bool> seenNow(result.subdividedMesh.faces.size(), false);
             if(gun.sprayEnabled) {
                 for(const Candidate& candidate : currentCandidates) {
                     ++result.statistics.candidatePairCount;
@@ -555,13 +642,11 @@ namespace spraythickness::published
                         ++result.statistics.hiddenElementCount;
                         continue;
                     }
-                    seenNow[candidate.faceIndex] = true;
-                    const bool stationary =
-                        candidate.spotSpeedMetersPerSecond <= kEpsilon
-                        && gun.velocity.norm() <= kEpsilon;
-                    if(!stationary && seenPrevious[candidate.faceIndex]) {
+                    if(candidate.facingCosine <= kEpsilon) {
                         continue;
                     }
+                    const bool stationary =
+                        candidate.spotSpeedMetersPerSecond <= kEpsilon;
                     const double baseThickness = parameters.thicknessTable.interpolate(
                         candidate.standOffDistance,
                         candidate.impactAngleDegrees);
@@ -586,11 +671,25 @@ namespace spraythickness::published
                                     * parameters.referenceSpotSpeedMillimetersPerSecond
                                 + parameters.speedCoefficientC);
                         increment *= speedFunction / referenceSpeedFunction;
+                        const std::size_t face = candidate.faceIndex;
+                        const std::size_t step =
+                            result.statistics.trajectorySampleCount;
+                        if(step == 0 || lastVisibleStep[face] != step - 1
+                            || lastVisiblePass[face] != movingPass) {
+                            passagePeak[face] = 0.0;
+                        }
+                        // Eq. (9) is one full moving pass. The paper does not specify
+                        // which overlapping sample represents it; retain its peak.
+                        const double additional =
+                            std::max(0.0, increment - passagePeak[face]);
+                        passagePeak[face] = std::max(passagePeak[face], increment);
+                        lastVisibleStep[face] = step;
+                        lastVisiblePass[face] = movingPass;
+                        increment = additional;
                     }
                     result.faceThicknessMeters[candidate.faceIndex] += increment;
                 }
             }
-            seenPrevious = std::move(seenNow);
             ++result.statistics.trajectorySampleCount;
             time += dt;
             reportProgress(execution,
@@ -599,12 +698,14 @@ namespace spraythickness::published
                 "Tzinava 2020 reproduction");
         }
 
+        reportDiagnostic(execution, "Result assembly",
+            "evaluated time steps="
+                + std::to_string(result.statistics.trajectorySampleCount));
         for(std::size_t faceIndex = 0;
             faceIndex < result.subdividedMesh.faces.size(); ++faceIndex) {
             result.faceCentroids[faceIndex] =
                 faceCentroid(result.subdividedMesh, faceIndex);
         }
-        result.statistics.visibilityQueryCount = result.statistics.candidatePairCount;
         result.statistics.elapsedMilliseconds = elapsedMilliseconds(started);
         return result;
     }
