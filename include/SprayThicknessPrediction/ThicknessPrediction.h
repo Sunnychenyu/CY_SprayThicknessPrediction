@@ -76,6 +76,13 @@ namespace spraythickness
         double resultConversionMilliseconds{ 0.0 };
         double gpuTimerReadMilliseconds{ 0.0 };
         double backendTotalMilliseconds{ 0.0 };
+        // Online display diagnostics; GPU timers and CPU waiting are separate.
+        double gpuDisplayCopyMilliseconds{ 0.0 };
+        double gpuStatisticsMilliseconds{ 0.0 };
+        double gpuCompletionWaitMilliseconds{ 0.0 };
+        std::size_t thicknessReadbackBytes{ 0 };
+        std::size_t statisticsReadbackBytes{ 0 };
+        bool gpuResidentDisplay{ false };
         double spatialGridCellSizeMeters{ 0.0 };
         std::size_t predictionVertexCount{ 0 };
         std::size_t spatialInputVertexCount{ 0 };
@@ -120,14 +127,18 @@ namespace spraythickness
     struct OnlineThicknessSnapshot
     {
         std::vector<float> thicknessMillimeters;
+        // A GPU frame carries metadata only. Never treat it as a CPU array.
+        std::size_t residentVertexCount = 0;
+        std::size_t finiteVertexCount = 0;
+        double varianceSquareMeters = 0.0;
         ThicknessMetrics metrics;
         ThicknessPredictionTiming timing;
 
-        bool empty() const { return thicknessMillimeters.empty(); }
-        std::size_t size() const { return thicknessMillimeters.size(); }
+        bool empty() const { return size() == 0; }
+        std::size_t size() const { return residentVertexCount ? residentVertexCount : thicknessMillimeters.size(); }
         double thicknessMeters(std::size_t index) const
         {
-            return static_cast<double>(thicknessMillimeters[index]) * 1.0e-3;
+            return static_cast<double>(thicknessMillimeters.at(index)) * 1.0e-3;
         }
     };
 
