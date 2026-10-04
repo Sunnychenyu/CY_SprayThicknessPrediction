@@ -5,6 +5,8 @@
 #include <WorkpieceCore/WorkpieceModel.h>
 
 #include <cstddef>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <atomic>
 #include <functional>
@@ -71,6 +73,8 @@ namespace spraythickness
         double dispatchMilliseconds{ 0.0 };
         double pureGpuMilliseconds{ 0.0 };
         double readbackMilliseconds{ 0.0 };
+        double resultConversionMilliseconds{ 0.0 };
+        double gpuTimerReadMilliseconds{ 0.0 };
         double backendTotalMilliseconds{ 0.0 };
         double spatialGridCellSizeMeters{ 0.0 };
         std::size_t predictionVertexCount{ 0 };
@@ -108,6 +112,23 @@ namespace spraythickness
         ThicknessMetrics metrics;
         ThicknessPredictionTiming timing;
         std::vector<std::string> warnings;
+    };
+
+    // An immutable online frame needs only the native GPU scalar and metrics.
+    // Keep the raw millimetre floats: converting to float metres would discard
+    // precision. Full per-vertex target/error records remain available separately.
+    struct OnlineThicknessSnapshot
+    {
+        std::vector<float> thicknessMillimeters;
+        ThicknessMetrics metrics;
+        ThicknessPredictionTiming timing;
+
+        bool empty() const { return thicknessMillimeters.empty(); }
+        std::size_t size() const { return thicknessMillimeters.size(); }
+        double thicknessMeters(std::size_t index) const
+        {
+            return static_cast<double>(thicknessMillimeters[index]) * 1.0e-3;
+        }
     };
 
     struct PaperGaussianParameters
@@ -248,6 +269,42 @@ namespace spraythickness
         static ThicknessMetrics calculate(
             const ThicknessField& field,
             const ThicknessPredictionOptions& options = {});
+    };
+
+    // Share the same metric rules with producers that already visit every sample.
+    class ThicknessMetricsAccumulator
+    {
+    public:
+        explicit ThicknessMetricsAccumulator(const ThicknessPredictionOptions& options = {});
+
+        void add(const ThicknessSampleResult& result)
+        {
+            m_metrics.minThickness = std::min(m_metrics.minThickness, result.thickness);
+            m_metrics.maxThickness = std::max(m_metrics.maxThickness, result.thickness);
+            m_sumThickness += result.thickness;
+            m_sumError += result.error;
+            m_metrics.maxAbsError = std::max(m_metrics.maxAbsError, std::abs(result.error));
+            const double lower = result.targetThickness - m_coverageTolerance;
+            const double upper = result.targetThickness + m_overCoatTolerance;
+            m_coveredCount += result.thickness >= lower && result.thickness <= upper;
+            m_underCount += result.thickness < lower;
+            m_overCount += result.thickness > upper;
+            ++m_count;
+        }
+
+        ThicknessMetrics metrics() const;
+        void merge(const ThicknessMetricsAccumulator& other);
+
+    private:
+        ThicknessMetrics m_metrics;
+        double m_coverageTolerance = 0.0;
+        double m_overCoatTolerance = 0.0;
+        double m_sumThickness = 0.0;
+        double m_sumError = 0.0;
+        std::size_t m_count = 0;
+        std::size_t m_coveredCount = 0;
+        std::size_t m_underCount = 0;
+        std::size_t m_overCount = 0;
     };
 
     class SprayThicknessPredictor

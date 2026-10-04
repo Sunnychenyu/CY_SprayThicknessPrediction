@@ -45,45 +45,45 @@ namespace spraythickness
         const ThicknessField& field,
         const ThicknessPredictionOptions& options)
     {
-        ThicknessMetrics metrics;
-        if (field.results.empty())
-            return metrics;
-
-        metrics.minThickness = std::numeric_limits<double>::max();
-        metrics.maxThickness = std::numeric_limits<double>::lowest();
-
-        double sumThickness = 0.0;
-        double sumError = 0.0;
-        size_t coveredCount = 0;
-        size_t underCount = 0;
-        size_t overCount = 0;
-
+        ThicknessMetricsAccumulator accumulator(options);
         for (const auto& result : field.results)
-        {
-            metrics.minThickness = std::min(metrics.minThickness, result.thickness);
-            metrics.maxThickness = std::max(metrics.maxThickness, result.thickness);
-            sumThickness += result.thickness;
-            sumError += result.error;
-            metrics.maxAbsError = std::max(metrics.maxAbsError, std::abs(result.error));
+            accumulator.add(result);
+        return accumulator.metrics();
+    }
 
-            const double lower = result.targetThickness - options.coverageTolerance;
-            const double upper = result.targetThickness + options.overCoatTolerance;
+    ThicknessMetricsAccumulator::ThicknessMetricsAccumulator(const ThicknessPredictionOptions& options)
+        : m_coverageTolerance(options.coverageTolerance)
+        , m_overCoatTolerance(options.overCoatTolerance)
+    {
+        m_metrics.minThickness = std::numeric_limits<double>::max();
+        m_metrics.maxThickness = std::numeric_limits<double>::lowest();
+    }
 
-            if (result.thickness >= lower && result.thickness <= upper)
-                ++coveredCount;
-            if (result.thickness < lower)
-                ++underCount;
-            if (result.thickness > upper)
-                ++overCount;
-        }
-
-        const double count = static_cast<double>(field.results.size());
-        metrics.averageThickness = sumThickness / count;
-        metrics.meanError = sumError / count;
-        metrics.coverageRatio = static_cast<double>(coveredCount) / count;
-        metrics.underCoatedRatio = static_cast<double>(underCount) / count;
-        metrics.overCoatedRatio = static_cast<double>(overCount) / count;
+    ThicknessMetrics ThicknessMetricsAccumulator::metrics() const
+    {
+        if(m_count == 0) return {};
+        ThicknessMetrics metrics = m_metrics;
+        const double count = static_cast<double>(m_count);
+        metrics.averageThickness = m_sumThickness / count;
+        metrics.meanError = m_sumError / count;
+        metrics.coverageRatio = static_cast<double>(m_coveredCount) / count;
+        metrics.underCoatedRatio = static_cast<double>(m_underCount) / count;
+        metrics.overCoatedRatio = static_cast<double>(m_overCount) / count;
         return metrics;
+    }
+
+    void ThicknessMetricsAccumulator::merge(const ThicknessMetricsAccumulator& other)
+    {
+        if(other.m_count == 0) return;
+        m_metrics.minThickness = std::min(m_metrics.minThickness, other.m_metrics.minThickness);
+        m_metrics.maxThickness = std::max(m_metrics.maxThickness, other.m_metrics.maxThickness);
+        m_metrics.maxAbsError = std::max(m_metrics.maxAbsError, other.m_metrics.maxAbsError);
+        m_sumThickness += other.m_sumThickness;
+        m_sumError += other.m_sumError;
+        m_count += other.m_count;
+        m_coveredCount += other.m_coveredCount;
+        m_underCount += other.m_underCount;
+        m_overCount += other.m_overCount;
     }
 
     ThicknessPredictionResult SprayThicknessPredictor::predict(
