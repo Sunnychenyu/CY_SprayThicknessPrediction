@@ -10,11 +10,13 @@
 #include <cstdint>
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace spraythickness
 {
+    struct MeshSamplingAssessment;
     enum class ThicknessModelKind
     {
         PaperGaussian
@@ -119,6 +121,7 @@ namespace spraythickness
         ThicknessMetrics metrics;
         ThicknessPredictionTiming timing;
         std::vector<std::string> warnings;
+        std::shared_ptr<const MeshSamplingAssessment> meshSamplingAssessment;
     };
 
     // An immutable online frame needs only the native GPU scalar and metrics.
@@ -246,6 +249,8 @@ namespace spraythickness
         PeriodicLocalPredictionOptions periodicLocal;
         AxisymmetricProfilePredictionOptions axisymmetricProfile;
         SpatialInfluenceFilteringOptions spatialFiltering;
+        // Offline quality diagnostics; excluded from backend/benchmark timing.
+        bool evaluateMeshSampling{ false };
     };
 
     struct ThicknessPredictionTask
