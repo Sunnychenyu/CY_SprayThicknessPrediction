@@ -54,5 +54,12 @@ namespace spraythickness
         double worstTimeSeconds{ 0.0 };
         double elapsedMilliseconds{ 0.0 };
         std::vector<MeshSamplingPointAssessment> points;
+        // Fused counting is included in the predictor's GPU time. These are
+        // separately measurable setup, zero-count probing and CPU summary costs.
+        bool gpuIntegrated{ false };
+        bool vertexMappingCacheHit{ false };
+        double preparationMilliseconds{ 0.0 };
+        double probeMilliseconds{ 0.0 };
+        double readbackMilliseconds{ 0.0 };
     };
 }

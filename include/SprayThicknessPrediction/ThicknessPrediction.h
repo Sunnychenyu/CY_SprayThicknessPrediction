@@ -249,7 +249,8 @@ namespace spraythickness
         PeriodicLocalPredictionOptions periodicLocal;
         AxisymmetricProfilePredictionOptions axisymmetricProfile;
         SpatialInfluenceFilteringOptions spatialFiltering;
-        // Offline quality diagnostics; excluded from backend/benchmark timing.
+        // Optional offline GPU diagnostics; fused counting is included in
+        // backend timing. Online and benchmark callers leave this disabled.
         bool evaluateMeshSampling{ false };
     };
 
