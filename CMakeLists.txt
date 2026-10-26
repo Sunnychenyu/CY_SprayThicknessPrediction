@@ -61,9 +61,9 @@ set_target_properties( ${TARGET_NAME} PROPERTIES
 )
 
 if(BuildTests)
-    add_subdirectory(regression/AlgorithmReproductionTest)
-    add_subdirectory(regression/DemoThicknessPredictionTest)
-    add_subdirectory(regression/RotationalSurfaceFitterTest)
+    rs2026_add_test_unit(regression/AlgorithmReproductionTest)
+    rs2026_add_test_unit(regression/DemoThicknessPredictionTest)
+    rs2026_add_test_unit(regression/RotationalSurfaceFitterTest)
 endif()
 
 if( ExportPacakge${PACKAGE_NAME}_${TARGET_NAME} )
