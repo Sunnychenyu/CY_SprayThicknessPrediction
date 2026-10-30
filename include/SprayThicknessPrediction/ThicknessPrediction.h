@@ -1,4 +1,5 @@
 #pragma once
+#include <SprayThicknessPrediction/DepositionRuntime.h>
 
 #include <SprayCore/SprayModel.h>
 #include <SprayTrajectoryCore/SprayTrajectory.h>
@@ -145,8 +146,24 @@ namespace spraythickness
         }
     };
 
+    struct HeatHistoryParameters
+    {
+        double correctionAmplitude{ 4.164041379 };
+        double historyScaleSeconds{ 62.61289749 };
+        double referenceHistorySeconds{ 4.0 };
+        double coolingTimeSeconds{ 0.144639594 };
+        double activityThresholdRatio{ 0.05 };
+    };
+
     struct PaperGaussianParameters
     {
+        bool useCalibratedHistory{ false };
+        HeatHistoryParameters calibratedHistory;
+        std::string calibrationModelId;
+        bool useCalibratedEfficiencies{ false };
+        bool efficiencyIncludesGeometry{ false };
+        CalibratedEfficiencyCurve distanceEfficiency;
+        CalibratedEfficiencyCurve angleEfficiency;
         double amplitudeMillimeters{ 0.5953252911 };
         double rotationRadians{ -0.04494047503 };
         double phiOffsetRadians{ 0.0002884115775 };
@@ -156,15 +173,6 @@ namespace spraythickness
         double referenceDistanceMeters{ 0.120 };
         double referenceAngleDegrees{ 90.0 };
         double referenceExposureSeconds{ 4.0 };
-    };
-
-    struct HeatHistoryParameters
-    {
-        double correctionAmplitude{ 4.164041379 };
-        double historyScaleSeconds{ 62.61289749 };
-        double referenceHistorySeconds{ 4.0 };
-        double coolingTimeSeconds{ 0.144639594 };
-        double activityThresholdRatio{ 0.05 };
     };
 
     struct PeriodicLocalPredictionOptions
