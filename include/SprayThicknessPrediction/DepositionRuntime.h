@@ -14,6 +14,10 @@ struct CalibratedEfficiencyCurve {
 };
 double evaluateCalibratedEfficiency(const CalibratedEfficiencyCurve& curve,double value);
 struct PaperGaussianParameters;
+struct HeatHistoryParameters;
+// elapsedSeconds is between interval ends and includes cooling gaps; rates are mm/s.
+double applyPaperGaussianHistory(double rateMillimetersPerSecond,double pattern,double dtSeconds,
+    double elapsedSeconds,double& tau,const HeatHistoryParameters& parameters);
 bool samePaperGaussianParameters(const PaperGaussianParameters& a,const PaperGaussianParameters& b);
 double paperGaussianDistanceEfficiency(const PaperGaussianParameters& p,double distanceMillimeters);
 double paperGaussianAngleEfficiency(const PaperGaussianParameters& p,double angleDegrees);

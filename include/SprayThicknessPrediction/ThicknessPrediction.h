@@ -148,6 +148,8 @@ namespace spraythickness
 
     struct HeatHistoryParameters
     {
+        bool continuousInput{ false };
+        double referencePeakRateMillimetersPerSecond{ 1.0 };
         double correctionAmplitude{ 4.164041379 };
         double historyScaleSeconds{ 62.61289749 };
         double referenceHistorySeconds{ 4.0 };

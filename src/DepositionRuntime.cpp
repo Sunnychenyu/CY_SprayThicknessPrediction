@@ -5,7 +5,9 @@
 namespace spraythickness {
 bool samePaperGaussianParameters(const PaperGaussianParameters& a,const PaperGaussianParameters& b) {
     const auto& x=a.calibratedHistory;const auto& y=b.calibratedHistory;
-    return a.useCalibratedHistory==b.useCalibratedHistory
+    return x.continuousInput==y.continuousInput
+        && x.referencePeakRateMillimetersPerSecond==y.referencePeakRateMillimetersPerSecond
+        && a.useCalibratedHistory==b.useCalibratedHistory
         && x.correctionAmplitude==y.correctionAmplitude && x.historyScaleSeconds==y.historyScaleSeconds
         && x.referenceHistorySeconds==y.referenceHistorySeconds && x.coolingTimeSeconds==y.coolingTimeSeconds
         && x.activityThresholdRatio==y.activityThresholdRatio
@@ -63,4 +65,15 @@ double paperGaussianRateMillimeters(const PaperGaussianParameters& p,double d,do
     return p.amplitudeMillimeters/std::max(p.referenceExposureSeconds,1e-9)*(p.efficiencyIncludesGeometry?1.0:std::pow(ref/d,2)*projection)*efficiency
         *std::exp(-.5*(std::pow(a/p.sigmaPhiRadians,2)+std::pow(b/p.sigmaPsiRadians,2)));
 }
+double applyPaperGaussianHistory(double rate,double pattern,double dt,double elapsed,double& tau,const HeatHistoryParameters& h)
+{
+    tau*=std::exp(-std::max(0.0,elapsed)/h.coolingTimeSeconds);
+    if(h.continuousInput){
+        const double d=std::clamp(rate/h.referencePeakRateMillimetersPerSecond,0.0,1.0);
+        tau+=h.coolingTimeSeconds*(-std::expm1(-dt/h.coolingTimeSeconds))*(d>=h.activityThresholdRatio?d:0.0);
+    }else if(pattern>=h.activityThresholdRatio)tau+=dt;
+    const double f=1+h.correctionAmplitude*(std::exp(-tau/h.historyScaleSeconds)-std::exp(-h.referenceHistorySeconds/h.historyScaleSeconds));
+    return rate*dt*(h.continuousInput?f:std::max(1.0,f));
+}
+
 }
