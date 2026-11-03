@@ -8,8 +8,11 @@ enum class EfficiencyCurveKind { Unit=0,LegacyDistance,LegacyAngle,Poly1,Poly2,P
 struct CalibratedEfficiencyCurve {
     EfficiencyCurveKind kind=EfficiencyCurveKind::Unit;
     std::vector<double> parameters,x,y;
+    // Optional linear continuation from (0,0) to the curve at this input value.
+    double lowerRampEnd=0.0;
     bool operator==(const CalibratedEfficiencyCurve& other) const {
-        return kind==other.kind && parameters==other.parameters && x==other.x && y==other.y;
+        return kind==other.kind && parameters==other.parameters && x==other.x && y==other.y
+            && lowerRampEnd==other.lowerRampEnd;
     }
 };
 double evaluateCalibratedEfficiency(const CalibratedEfficiencyCurve& curve,double value);
@@ -17,8 +20,11 @@ struct PaperGaussianParameters;
 struct HeatHistoryParameters;
 // elapsedSeconds is between interval ends and includes cooling gaps; rates are mm/s.
 double applyPaperGaussianHistory(double rateMillimetersPerSecond,double pattern,double dtSeconds,
-    double elapsedSeconds,double& tau,const HeatHistoryParameters& parameters);
+    double elapsedSeconds,double& tau,const HeatHistoryParameters& parameters,double densityCorrection=1.0);
 bool samePaperGaussianParameters(const PaperGaussianParameters& a,const PaperGaussianParameters& b);
+double paperGaussianDensityCorrection(const PaperGaussianParameters& p,double distanceMm,double angleDegrees);
+double paperGaussianPattern(const PaperGaussianParameters& p,double phiRadians,double psiRadians);
+double paperGaussianSupportAngle(const PaperGaussianParameters& p,double gaussianRadius);
 double paperGaussianDistanceEfficiency(const PaperGaussianParameters& p,double distanceMillimeters);
 double paperGaussianAngleEfficiency(const PaperGaussianParameters& p,double angleDegrees);
 // CPU reference of the exact base deposition law, before optional heat history / occlusion.

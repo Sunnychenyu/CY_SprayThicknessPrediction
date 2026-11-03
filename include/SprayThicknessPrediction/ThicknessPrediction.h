@@ -157,8 +157,15 @@ namespace spraythickness
         double activityThresholdRatio{ 0.05 };
     };
 
+    struct GaussianMixtureComponent {
+        double coefficient=1,phi0=0,psi0=0,sigmaPhi=0.02,sigmaPsi=0.02;
+        bool operator==(const GaussianMixtureComponent& b) const {
+            return coefficient==b.coefficient && phi0==b.phi0 && psi0==b.psi0 && sigmaPhi==b.sigmaPhi && sigmaPsi==b.sigmaPsi;
+        }
+    };
     struct PaperGaussianParameters
     {
+        std::vector<GaussianMixtureComponent> gaussianComponents;
         bool useCalibratedHistory{ false };
         HeatHistoryParameters calibratedHistory;
         std::string calibrationModelId;
@@ -166,6 +173,10 @@ namespace spraythickness
         bool efficiencyIncludesGeometry{ false };
         CalibratedEfficiencyCurve distanceEfficiency;
         CalibratedEfficiencyCurve angleEfficiency;
+        bool useCalibratedDensity{ false };
+        CalibratedEfficiencyCurve distanceDensity, angleDensity;
+        double densityDistanceMinMm{0}, densityDistanceMaxMm{1e9};
+        double densityAngleMinDegrees{0}, densityAngleMaxDegrees{90};
         double amplitudeMillimeters{ 0.5953252911 };
         double rotationRadians{ -0.04494047503 };
         double phiOffsetRadians{ 0.0002884115775 };
@@ -253,6 +264,7 @@ namespace spraythickness
         HeatHistoryParameters history;
         bool enableBvhOcclusion{ true };
         bool enableHistoryCorrection{ true };
+        double initialHistorySeconds{ 0.0 };
         double shadowBiasMeters{ 1.0e-5 };
         // Zero lets the GPU backend select and calibrate the batch size.
         std::size_t trajectoryBatchSize{ 0 };
