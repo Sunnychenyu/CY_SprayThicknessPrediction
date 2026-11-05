@@ -116,6 +116,32 @@ namespace spraythickness
         bool useSampleAreaWeight{ true };
     };
 
+    struct DynamicSurfaceOptions
+    {
+        bool enabled{ false };
+        double maximumGrowthMeters{ 5.0e-6 };
+        double maximumNormalChangeDegrees{ 2.0 };
+        double maximumIntervalSeconds{ 0.1 };
+    };
+
+    // World coordinates and accumulated normal deposition are deliberately
+    // separate: a curved growth path is not a straight displacement vector.
+    struct DynamicSurfaceSnapshot
+    {
+        std::shared_ptr<const sprayworkpiece::WorkpieceModel> substrate;
+        std::vector<Eigen::Vector3d> positions;
+        std::vector<Eigen::Vector3d> normals;
+        std::vector<double> thicknessMeters;
+        std::vector<float> historySeconds;
+        std::vector<float> lastUpdateSeconds;
+        std::vector<float> historyFactors;
+        DynamicSurfaceOptions options;
+        double simulationSeconds{ 0.0 };
+        double elapsedSeconds{ 0.0 };
+        std::size_t acceptedSteps{ 0 };
+        std::size_t rejectedSteps{ 0 };
+    };
+
     struct ThicknessPredictionResult
     {
         ThicknessField field;
@@ -123,6 +149,7 @@ namespace spraythickness
         ThicknessPredictionTiming timing;
         std::vector<std::string> warnings;
         std::shared_ptr<const MeshSamplingAssessment> meshSamplingAssessment;
+        std::shared_ptr<const DynamicSurfaceSnapshot> dynamicSurface;
     };
 
     // An immutable online frame needs only the native GPU scalar and metrics.
@@ -274,6 +301,7 @@ namespace spraythickness
         // Optional offline GPU diagnostics; fused counting is included in
         // backend timing. Online and benchmark callers leave this disabled.
         bool evaluateMeshSampling{ false };
+        DynamicSurfaceOptions dynamicSurface;
     };
 
     struct ThicknessPredictionTask
@@ -290,6 +318,7 @@ namespace spraythickness
     {
         const std::atomic_bool* cancelRequested{ nullptr };
         std::function<void(double, const std::string&)> progress;
+        std::function<void(std::shared_ptr<const DynamicSurfaceSnapshot>)> surfacePreview;
     };
 
     class IThicknessPredictionBackend
