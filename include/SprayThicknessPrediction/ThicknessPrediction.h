@@ -279,7 +279,9 @@ namespace spraythickness
         bool filterCandidateVertices{ false };
         // Optional restricted prediction list. The workpiece remains complete
         // so its triangle data can still be used for occlusion BVH traversal.
-        // An empty list preserves the original all-vertex behavior.
+        // Offline prediction also honors this list when spatial filtering is
+        // disabled, without applying a contribution cutoff. Unselected results
+        // remain zero; an empty list preserves the original all-vertex behavior.
         std::vector<std::uint32_t> predictionVertexIndices;
         bool fallbackToFullPrediction{ true };
     };
