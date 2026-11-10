@@ -200,6 +200,7 @@ namespace spraythickness
         bool efficiencyIncludesGeometry{ false };
         CalibratedEfficiencyCurve distanceEfficiency;
         CalibratedEfficiencyCurve angleEfficiency;
+        double densityMultiplier{ 1.0 };
         bool useCalibratedDensity{ false };
         CalibratedEfficiencyCurve distanceDensity, angleDensity;
         double densityDistanceMinMm{0}, densityDistanceMaxMm{1e9};

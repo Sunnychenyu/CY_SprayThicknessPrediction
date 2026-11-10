@@ -12,7 +12,7 @@ bool samePaperGaussianParameters(const PaperGaussianParameters& a,const PaperGau
         && x.referenceHistorySeconds==y.referenceHistorySeconds && x.coolingTimeSeconds==y.coolingTimeSeconds
         && x.activityThresholdRatio==y.activityThresholdRatio
         && a.calibrationModelId==b.calibrationModelId && a.useCalibratedEfficiencies==b.useCalibratedEfficiencies
-        && a.useCalibratedDensity==b.useCalibratedDensity
+        && a.densityMultiplier==b.densityMultiplier && a.useCalibratedDensity==b.useCalibratedDensity
         && a.distanceDensity==b.distanceDensity && a.angleDensity==b.angleDensity
         && a.densityDistanceMinMm==b.densityDistanceMinMm && a.densityDistanceMaxMm==b.densityDistanceMaxMm
         && a.densityAngleMinDegrees==b.densityAngleMinDegrees && a.densityAngleMaxDegrees==b.densityAngleMaxDegrees
@@ -86,12 +86,12 @@ double paperGaussianSupportAngle(const PaperGaussianParameters& p,double radius)
 }
 
 double paperGaussianDensityCorrection(const PaperGaussianParameters& p,double d,double a){
-    if(!p.useCalibratedDensity)return 1.0;
+    if(!p.useCalibratedDensity)return p.densityMultiplier;
     const double rd=evaluateCalibratedEfficiency(p.distanceDensity,p.referenceDistanceMeters*1000);
     const double ra=evaluateCalibratedEfficiency(p.angleDensity,p.referenceAngleDegrees);
     const double localD=evaluateCalibratedEfficiency(p.distanceDensity,std::clamp(d,p.densityDistanceMinMm,p.densityDistanceMaxMm));
     const double localA=evaluateCalibratedEfficiency(p.angleDensity,std::clamp(a,p.densityAngleMinDegrees,p.densityAngleMaxDegrees));
-    return rd*ra/std::max(localD*localA,1e-12);
+    return p.densityMultiplier*rd*ra/std::max(localD*localA,1e-12);
 }
 double paperGaussianRateMillimeters(const PaperGaussianParameters& p,double d,double angle,double phi,double psi){
     if(d<=0 || angle<=0)return 0;
